@@ -3,6 +3,7 @@ import pandas as pd
 import joblib
 from pathlib import Path
 import warnings
+import json
 
 st.set_page_config(
     page_title="Classificador de Ocorrências",
@@ -26,6 +27,7 @@ st.warning(
 )
 
 MODEL_PATH = Path(__file__).resolve().parent / "modelo_mlp_roubo_furto.joblib"
+MAPPING_PATH = Path(__file__).resolve().parent / "mapeamento_locais.json"
 
 @st.cache_resource
 def carregar_pacote(caminho):
@@ -104,30 +106,52 @@ if pacote is not None:
         st.stop()
 
     st.subheader("Dados da ocorrência")
-    st.caption("As listas abaixo contêm somente categorias presentes no treinamento do modelo.")
+    st.caption("As listas contêm categorias presentes no treinamento. O subtipo é filtrado conforme o tipo de local selecionado.")
 
-    with st.form("formulario_ocorrencia"):
-        bairro = st.selectbox("Bairro", categorias["BAIRRO"])
-        tipo_local = st.selectbox("Tipo de local", categorias["DESCR_TIPOLOCAL"])
-        subtipo_local = st.selectbox("Subtipo do local", categorias["DESCR_SUBTIPOLOCAL"])
-        periodo = st.selectbox("Período do dia", categorias["DESCR_PERIODO"])
+    if not MAPPING_PATH.exists():
+        st.error("O arquivo mapeamento_locais.json não foi encontrado. Adicione-o ao repositório junto com o app.py.")
+        st.stop()
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            mes = st.selectbox("Mês", list(range(1, 13)), format_func=lambda x: f"{x:02d}")
-        with c2:
-            dia_semana = st.selectbox(
-                "Dia da semana",
-                [
-                    ("Segunda-feira", 0), ("Terça-feira", 1), ("Quarta-feira", 2),
-                    ("Quinta-feira", 3), ("Sexta-feira", 4), ("Sábado", 5), ("Domingo", 6)
-                ],
-                format_func=lambda x: x[0]
-            )
-        with c3:
-            hora = st.selectbox("Hora", list(range(24)), format_func=lambda x: f"{x:02d}:00")
+    with open(MAPPING_PATH, "r", encoding="utf-8") as f:
+        mapeamento_locais = json.load(f)
 
-        enviar = st.form_submit_button("Classificar ocorrência", use_container_width=True)
+    # Mantém apenas tipos e subtipos também reconhecidos pelo modelo treinado.
+    tipos_validos = [
+        tipo for tipo in categorias["DESCR_TIPOLOCAL"]
+        if tipo in mapeamento_locais
+    ]
+    if not tipos_validos:
+        st.error("Não há tipos de local em comum entre o modelo e o mapeamento da base SSP-SP.")
+        st.stop()
+
+    bairro = st.selectbox("Bairro", categorias["BAIRRO"])
+    tipo_local = st.selectbox("Tipo de local", tipos_validos)
+    subtipos_do_tipo = [
+        subtipo for subtipo in mapeamento_locais[tipo_local]
+        if subtipo in categorias["DESCR_SUBTIPOLOCAL"]
+    ]
+    if not subtipos_do_tipo:
+        st.error("Não há subtipos desse tipo disponíveis no modelo treinado.")
+        st.stop()
+    subtipo_local = st.selectbox("Subtipo do local", subtipos_do_tipo)
+    periodo = st.selectbox("Período do dia", categorias["DESCR_PERIODO"])
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        mes = st.selectbox("Mês", list(range(1, 13)), format_func=lambda x: f"{x:02d}")
+    with c2:
+        dia_semana = st.selectbox(
+            "Dia da semana",
+            [
+                ("Segunda-feira", 0), ("Terça-feira", 1), ("Quarta-feira", 2),
+                ("Quinta-feira", 3), ("Sexta-feira", 4), ("Sábado", 5), ("Domingo", 6)
+            ],
+            format_func=lambda x: x[0]
+        )
+    with c3:
+        hora = st.selectbox("Hora", list(range(24)), format_func=lambda x: f"{x:02d}:00")
+
+    enviar = st.button("Classificar ocorrência", use_container_width=True)
 
     if enviar:
         entrada = pd.DataFrame([{
